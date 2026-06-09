@@ -68,13 +68,33 @@ export function parseInfoMessage(message: string, t: (key: string, opts?: any) =
   return { summary: message };
 }
 
+// Status tokens that appear in backend info messages. The backend emits these
+// bilingually via `flock_core::tr(zh, en)`, so detection must match both the
+// Chinese and English wording — otherwise the success/error styling silently
+// breaks in the English locale.
+const SUCCESS_TOKENS = ['已就绪', '成功', '完成', 'ready', 'success', 'succeeded', 'completed', 'complete'];
+const ERROR_TOKENS = ['失败', '出错', '健康状态', '失效', 'failed', 'failure', 'error', 'expired', 'unable'];
+
+export function detectInfoStatus(message: string): 'success' | 'error' | null {
+  // A structured tool-result marker ("[name success]" / "[name error]") is authoritative.
+  const marker = message.match(/^\[[a-zA-Z0-9_-]+\s+(success|error)\]/);
+  if (marker) return marker[1] as 'success' | 'error';
+
+  const lower = message.toLowerCase();
+  // Check error first so phrasings like "build error" win over a stray "success" substring.
+  if (ERROR_TOKENS.some(token => lower.includes(token.toLowerCase()))) return 'error';
+  if (SUCCESS_TOKENS.some(token => lower.includes(token.toLowerCase()))) return 'success';
+  return null;
+}
+
 export function InfoItem({ info }: { info: InfoChunk }) {
   const { t } = useTranslation();
   const { summary, output } = parseInfoMessage(info.message, t);
   const [outputCollapsed, setOutputCollapsed] = useState(true);
 
-  const isSuccess = info.message.includes('已就绪') || info.message.includes('成功') || info.message.includes('完成');
-  const isError = info.message.includes('失败') || info.message.includes('出错') || info.message.includes('健康状态') || info.message.includes('失效');
+  const status = detectInfoStatus(info.message);
+  const isSuccess = status === 'success';
+  const isError = status === 'error';
 
   return (
     <Box style={{ marginBottom: 6 }}>
@@ -158,9 +178,7 @@ export function InfoGroupRenderer({ infos, isStreaming }: InfoGroupRendererProps
 
   if (infos.length === 0) return null;
 
-  const hasError = infos.some(info =>
-    info.message.includes('失败') || info.message.includes('出错') || info.message.includes('健康状态') || info.message.includes('失效')
-  );
+  const hasError = infos.some(info => detectInfoStatus(info.message) === 'error');
   
   const latestMessage = infos[infos.length - 1].message;
   const isFinished = !isStreaming;
